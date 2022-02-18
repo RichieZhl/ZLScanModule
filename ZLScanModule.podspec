@@ -34,8 +34,8 @@ TODO: Add long description of the pod here.
   
   s.resources = 'ZLScanModule/Assets/*'
   
-  s.frameworks = 'AVFoundation', 'CoreMedia', 'CoreImage', 'PhotosUI'
-  s.vendored_frameworks = 'ZLScanModule/Frameworks/*.framework'
+  s.ios.frameworks = 'AVFoundation', 'CoreMedia', 'CoreImage', 'PhotosUI'
+  s.ios.vendored_frameworks = 'ZLScanModule/Frameworks/*.framework'
 
   # s.public_header_files = 'Pod/Classes/**/*.h'
   # s.frameworks = 'UIKit', 'MapKit'
