@@ -167,8 +167,3 @@ framework module opencv2 {
   export *
   module * {export *}
 }
-
-module opencv2.Swift {
-    header "opencv2-Swift.h"
-    requires objc
-}
