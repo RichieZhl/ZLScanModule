@@ -17,6 +17,7 @@
 #include <vector>
 #import <PhotosUI/PhotosUI.h>
 #import <CoreImage/CoreImage.h>
+#import <AVFoundation/AVFoundation.h>
 
 @interface ZLCodeController () <CvVideoCameraDelegate2, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate> {
     BOOL _navigationBarHidden;
@@ -25,6 +26,9 @@
     
     CvVideoCamera2 *camera;
     int qrScanCount;
+    
+    BOOL firstStartScanLineAnimation;
+    BOOL scanLineAnimationing;
 }
 
 @property (nonatomic, weak) UIButton *backButton;
@@ -32,6 +36,10 @@
 @property (nonatomic, weak) UIButton *torchButton;
 
 @property (nonatomic, strong) NSMutableArray<NSString *> *codes;
+
+@property (nonatomic, strong) AVAudioPlayer *mPlayer;
+
+@property (nonatomic, weak) UIImageView *scanLineView;
 
 @end
 
@@ -83,8 +91,10 @@
 
 - (void)dealloc {
     camera = nil;
+    _mPlayer = nil;
     detector.release();
     barcodeDet.release();
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -239,9 +249,20 @@
     
     self.codes = [NSMutableArray arrayWithCapacity:4];
     
+    firstStartScanLineAnimation = YES;
     camera = [[CvVideoCamera2 alloc] initWithParentView:self.view];
     camera.delegate = self;
     [camera start];
+    
+    {
+        UIImageView *scanLineView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"zl_scan.bundle/scan_line" inBundle:[NSBundle bundleForClass:[ZLCodeController class]] compatibleWithTraitCollection:nil]];
+        CGFloat scanLineViewW = [UIScreen mainScreen].bounds.size.width - 70;
+        CGFloat scanLineViewH = scanLineViewW * 18.0 / 360;
+        CGFloat scanLineViewY = ([UIScreen mainScreen].bounds.size.height - scanLineViewH) * 0.5 - 150;
+        scanLineView.frame = CGRectMake(35, scanLineViewY, scanLineViewW, scanLineViewH);
+        [self.view addSubview:scanLineView];
+        self.scanLineView = scanLineView;
+    }
     
     {
         UIButton *button = [[UIButton alloc] initWithFrame:CGRectMake(([UIScreen mainScreen].bounds.size.width - WH) * 0.5, [UIScreen mainScreen].bounds.size.height * 0.7, WH, WH)];
@@ -262,9 +283,51 @@
     [self.view bringSubviewToFront:self.backButton];
 }
 
+- (void)addScanAnimation {
+    if (scanLineAnimationing) {
+        return;
+    }
+    scanLineAnimationing = YES;
+    CAAnimationGroup *group = [CAAnimationGroup animation];
+    
+    CABasicAnimation *basicAni = [CABasicAnimation animationWithKeyPath:@"position.y"];
+    basicAni.byValue = @300;
+    basicAni.duration = 3;
+    
+    CAKeyframeAnimation *animation = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
+    animation.values = @[@0.5, @1, @0.5];
+    animation.duration = 3;
+    
+    group.animations = @[basicAni, animation];
+    group.duration = 3;
+    group.repeatCount = CGFLOAT_MAX;
+    
+    [self.scanLineView.layer addAnimation:group forKey:@"scan_animation"];
+}
+
+- (void)removeScanAnimation {
+    scanLineAnimationing = NO;
+    [self.scanLineView.layer removeAnimationForKey:@"scan_animation"];
+}
+
+- (void)playComplete {
+    if (self.mPlayer != nil) {
+        [self.mPlayer stop];
+    } else {
+        NSURL *url = [[NSBundle bundleForClass:[ZLCodeController class]] URLForResource:@"zl_scan.bundle/scan_completed" withExtension:@"mp3"];
+        self.mPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:nil];
+    }
+    if (self.mPlayer != nil) {
+        [self.mPlayer prepareToPlay];
+        [self.mPlayer play];
+    }
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     // Do any additional setup after loading the view.
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(addScanAnimation) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(removeScanAnimation) name:UIApplicationDidEnterBackgroundNotification object:nil];
 }
 
 - (void)showImagePicker {
@@ -353,6 +416,12 @@ static void detect_brightness(cv::Mat input_img, float& cast, float& da) {
 }
 
 - (void)processImage:(Mat *)image {
+    if (firstStartScanLineAnimation) {
+        firstStartScanLineAnimation = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self addScanAnimation];
+        });
+    }
     cv::Mat *img = (cv::Mat *)image.nativePtr;
     
     if (!torchOn) {
@@ -378,6 +447,7 @@ static void detect_brightness(cv::Mat input_img, float& cast, float& da) {
     }
     
     if ([self detectWithBarcode:img]) {
+        [self playComplete];
         dispatch_async(dispatch_get_main_queue(), ^{
             UIView *snapView = [self.view snapshotViewAfterScreenUpdates:YES];
             [self.view addSubview:snapView];
@@ -393,12 +463,14 @@ static void detect_brightness(cv::Mat input_img, float& cast, float& da) {
     double scale = image.width / [UIScreen mainScreen].bounds.size.width;
     if (strDecoded.size() > 0) {
         if (qrScanCount++ > 5) {
+            [self playComplete];
             if (strDecoded.size() == 1) {
                 dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     [self handleResult:[NSString stringWithUTF8String:strDecoded[0].c_str()]];
                 });
             }
             dispatch_async(dispatch_get_main_queue(), ^{
+                self.scanLineView.hidden = YES;
                 UIView *snapView = [self.view snapshotViewAfterScreenUpdates:YES];
                 [self.codes removeAllObjects];
                 if (strDecoded.size() > 1) {
@@ -487,6 +559,7 @@ static void detect_brightness(cv::Mat input_img, float& cast, float& da) {
 }
 
 - (void)handlePickerImage:(UIImage *)image {
+    
     CIDetector *detector = [CIDetector detectorOfType:CIDetectorTypeQRCode context:nil options:@{CIDetectorAccuracy: CIDetectorAccuracyHigh}];
     NSArray<CIFeature *> *features = [detector featuresInImage:[CIImage imageWithCGImage:image.CGImage]];
     if (features == nil || features.count == 0) {
@@ -495,6 +568,7 @@ static void detect_brightness(cv::Mat input_img, float& cast, float& da) {
         }
         return;
     }
+    [self playComplete];
     CIQRCodeFeature *feature = (CIQRCodeFeature *)features.firstObject;
     NSString *code = feature.messageString;
     [self handleResult:code];
