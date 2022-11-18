@@ -19,6 +19,8 @@
 #import <CoreImage/CoreImage.h>
 #import <AVFoundation/AVFoundation.h>
 
+static AVAudioPlayer *ZLCodeControllerPlayer = nil;
+
 @interface ZLCodeController () <CvVideoCameraDelegate2, UINavigationControllerDelegate, UIImagePickerControllerDelegate, PHPickerViewControllerDelegate> {
     BOOL _navigationBarHidden;
     cv::Ptr<cv::wechat_qrcode::WeChatQRCode> detector;
@@ -36,8 +38,6 @@
 @property (nonatomic, weak) UIButton *torchButton;
 
 @property (nonatomic, strong) NSMutableArray<NSString *> *codes;
-
-@property (nonatomic, strong) AVAudioPlayer *mPlayer;
 
 @property (nonatomic, weak) UIImageView *scanLineView;
 
@@ -91,7 +91,6 @@
 
 - (void)dealloc {
     camera = nil;
-    _mPlayer = nil;
     detector.release();
     barcodeDet.release();
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -311,15 +310,15 @@
 }
 
 - (void)playComplete {
-    if (self.mPlayer != nil) {
-        [self.mPlayer stop];
+    if (ZLCodeControllerPlayer != nil) {
+        [ZLCodeControllerPlayer stop];
     } else {
         NSURL *url = [[NSBundle bundleForClass:[ZLCodeController class]] URLForResource:@"zl_scan.bundle/scan_completed" withExtension:@"mp3"];
-        self.mPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:nil];
+        ZLCodeControllerPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:nil];
     }
-    if (self.mPlayer != nil) {
-        [self.mPlayer prepareToPlay];
-        [self.mPlayer play];
+    if (ZLCodeControllerPlayer != nil) {
+        [ZLCodeControllerPlayer prepareToPlay];
+        [ZLCodeControllerPlayer play];
     }
 }
 
